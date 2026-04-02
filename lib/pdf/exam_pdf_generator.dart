@@ -13,11 +13,9 @@ class ExamPdfGenerator {
   static const double _pageMargin = 28;
   static const double _slotGap = 5;
   static const double _blockSpacing = 5;
-  static const double _headerSpacing = 4;
   static const double _estimatedHeaderHeight = 75;
 
   static const double _blockPadding = 2.5;
-  static const double _singleLineTitleHeight = 9.5;
   static const double _doubleLineTitleHeight = 16.5;
   static const double _titleBottomGap = 4;
 
@@ -436,7 +434,6 @@ class _MateriaLayoutBlock {
       span: slotSpan,
     );
     final blockWidth = math.min(desiredBlockWidth, maxBlockWidth);
-    final titleContentWidth = blockWidth - (ExamPdfGenerator._blockPadding * 2);
     final titleLineCount = 2;
     final titleHeight = ExamPdfGenerator._doubleLineTitleHeight;
 
@@ -473,13 +470,6 @@ class _MateriaLayoutBlock {
     }
 
     return questionColumnWidth + ExamPdfGenerator._singleColumnSafetyWidth;
-  }
-
-  static int _resolveTitleLineCount({
-    required _TitleMetrics titleMetrics,
-    required double titleContentWidth,
-  }) {
-    return titleMetrics.singleLineWidth <= titleContentWidth ? 1 : 2;
   }
 
   static int _resolveSlotSpan({

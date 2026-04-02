@@ -1,16 +1,9 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
-import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
-import 'package:path_provider/path_provider.dart';
 
 import 'exam_models.dart';
 import 'pdf/exam_pdf_generator.dart';
+import 'scan/camera_screen.dart';
 
 void main() {
   runApp(const CalificadorApp());
@@ -72,32 +65,18 @@ class _FormularioExamenScreenState extends State<FormularioExamenScreen> {
   }
 
   Future<void> _escanearExamen() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? photo = await picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 95,
+    final resultados = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (_) => CameraScreen(materias: materias)),
     );
 
-    if (photo == null) return;
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
+    if (!mounted || resultados == null) {
+      return;
+    }
 
     try {
-      final jpgPath = await convertirImagenAJpg(photo.path);
-      final resultados = await subirExamen(jpgPath, materias);
-
-      if (!mounted) return;
-      Navigator.of(context).pop();
       _mostrarResultados(resultados);
     } catch (e) {
-      if (!mounted) return;
-      Navigator.of(context).pop();
-
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(e.toString())));
@@ -323,78 +302,4 @@ class PdfPreviewScreen extends StatelessWidget {
       ),
     );
   }
-}
-
-Future<Map<String, dynamic>> subirExamen(
-  String imagePath,
-  List<Materia> materias,
-) async {
-  final uri = Uri.parse('http://192.168.1.73:8000/calificar');
-
-  final request = http.MultipartRequest('POST', uri);
-
-  request.fields['lista_materias'] = materias
-      .map((m) => normalizarNombreMateria(m.nombre))
-      .join(',');
-
-  final file = File(imagePath);
-  if (!await file.exists()) {
-    throw Exception('La imagen no existe en la ruta: $imagePath');
-  }
-
-  final multipartFile = await http.MultipartFile.fromPath(
-    'file',
-    imagePath,
-    filename: 'examen.jpg',
-    contentType: MediaType('image', 'jpeg'),
-  );
-
-  request.files.add(multipartFile);
-
-  final streamedResponse = await request.send();
-  final response = await http.Response.fromStream(streamedResponse);
-
-  debugPrint('STATUS: ${response.statusCode}');
-  debugPrint('BODY: ${response.body}');
-  debugPrint('PATH ENVIADO: $imagePath');
-
-  final body = response.body.isNotEmpty ? jsonDecode(response.body) : null;
-
-  if (response.statusCode == 200) {
-    if (body is Map<String, dynamic> && body['data'] is Map<String, dynamic>) {
-      return Map<String, dynamic>.from(body['data']);
-    }
-    if (body is Map<String, dynamic>) {
-      return body;
-    }
-    throw Exception('Respuesta del servidor no válida');
-  }
-
-  if (body is Map<String, dynamic> && body['detail'] != null) {
-    throw Exception(body['detail'].toString());
-  }
-
-  throw Exception('Error del servidor: ${response.statusCode}');
-}
-
-Future<String> convertirImagenAJpg(String originalPath) async {
-  final tempDir = await getTemporaryDirectory();
-  final targetPath =
-      '${tempDir.path}/upload_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-  final result = await FlutterImageCompress.compressAndGetFile(
-    originalPath,
-    targetPath,
-    format: CompressFormat.jpeg,
-    quality: 90,
-  );
-
-  if (result == null) {
-    throw Exception('No se pudo convertir la imagen a JPG');
-  }
-
-  debugPrint('ORIGINAL: $originalPath');
-  debugPrint('CONVERTIDA: ${result.path}');
-
-  return result.path;
 }
