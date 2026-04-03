@@ -9,10 +9,10 @@ import 'scan_models.dart';
 class MarkerDetector {
   const MarkerDetector({
     this.guideRect = const NormalizedRect(
-      left: 0.12,
-      top: 0.16,
-      right: 0.88,
-      bottom: 0.84,
+      left: 0.08, // 🔥 Regresamos a tu ancho original (más angosto)
+      top: 0.22, // 🔥 Mantenemos la nueva altura que quedó perfecta
+      right: 0.92, // 🔥 Regresamos a tu ancho original
+      bottom: 0.78, // 🔥 Mantenemos la nueva altura
     ),
   });
 
@@ -80,13 +80,39 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
     bottom: (payload['guideBottom']! as num).toDouble(),
   );
 
+  // 🔥 MAGIA AQUÍ: Detectar si el sensor de la cámara está "acostado" (Landscape)
+  // mientras el teléfono está "de pie" (Portrait).
+  final isRotated = width > height;
+
+  // Convertimos el marco guía de la pantalla a las coordenadas reales del sensor
+  double sGuideLeft = guideRect.left;
+  double sGuideRight = guideRect.right;
+  double sGuideTop = guideRect.top;
+  double sGuideBottom = guideRect.bottom;
+
+  if (isRotated) {
+    // Rotación de 90 grados en dirección a las manecillas del reloj (Estándar en Android)
+    sGuideLeft = guideRect.top;
+    sGuideRight = guideRect.bottom;
+    sGuideTop = 1.0 - guideRect.right;
+    sGuideBottom = 1.0 - guideRect.left;
+  }
+
   final longestSide = math.max(width, height);
-  final sampleStep = math.max(2, longestSide ~/ 180);
+  final sampleStep = math.max(1, longestSide ~/ 320);
   final reducedWidth = math.max(1, width ~/ sampleStep);
   final reducedHeight = math.max(1, height ~/ sampleStep);
 
   final luminance = List<int>.filled(reducedWidth * reducedHeight, 0);
+  
+  final minGuideX = (sGuideLeft * reducedWidth).toInt();
+  final maxGuideX = (sGuideRight * reducedWidth).toInt();
+  final minGuideY = (sGuideTop * reducedHeight).toInt();
+  final maxGuideY = (sGuideBottom * reducedHeight).toInt();
+
   var sum = 0;
+  var sampleCount = 0;
+
   for (var y = 0; y < reducedHeight; y++) {
     final sourceY = math.min(height - 1, y * sampleStep);
     for (var x = 0; x < reducedWidth; x++) {
@@ -94,12 +120,18 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
       final value = bytes[(sourceY * bytesPerRow) + sourceX];
       final index = (y * reducedWidth) + x;
       luminance[index] = value;
-      sum += value;
+      
+      // Calculamos la luz solo dentro del marco para ignorar la mesa oscura
+      if (x >= minGuideX && x <= maxGuideX && y >= minGuideY && y <= maxGuideY) {
+        sum += value;
+        sampleCount++;
+      }
     }
   }
 
-  final mean = sum / luminance.length;
-  final threshold = math.min(90.0, mean * 0.58).round();
+  final mean = sampleCount > 0 ? sum / sampleCount : 128.0;
+  final threshold = math.min(150.0, mean * 0.75).round();
+  
   final visited = Uint8List(reducedWidth * reducedHeight);
   final candidates = <_BlobCandidate>[];
   final queueX = List<int>.filled(reducedWidth * reducedHeight, 0);
@@ -140,10 +172,7 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
         maxY = math.max(maxY, currentY);
 
         for (final delta in const <List<int>>[
-          [-1, 0],
-          [1, 0],
-          [0, -1],
-          [0, 1],
+          [-1, 0], [1, 0], [0, -1], [0, 1],
         ]) {
           final nextX = currentX + delta[0];
           final nextY = currentY + delta[1];
@@ -172,10 +201,20 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
       final boxArea = boxWidth * boxHeight;
       final fillRatio = count / boxArea;
       final areaRatio = boxArea / (reducedWidth * reducedHeight);
-      final center = Offset(
-        (sumX / count + 0.5) / reducedWidth,
-        (sumY / count + 0.5) / reducedHeight,
-      );
+      
+      double normX = (sumX / count + 0.5) / reducedWidth;
+      double normY = (sumY / count + 0.5) / reducedHeight;
+
+      // 🔥 AQUÍ DEVOLVEMOS LAS COORDENADAS A LA NORMALIDAD (PORTRAIT)
+      double finalX = normX;
+      double finalY = normY;
+      
+      if (isRotated) {
+        finalX = 1.0 - normY;
+        finalY = normX;
+      }
+
+      final center = Offset(finalX, finalY);
 
       final insideLooseGuide =
           center.dx >= guideRect.left - 0.08 &&
@@ -183,12 +222,14 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
           center.dy >= guideRect.top - 0.08 &&
           center.dy <= guideRect.bottom + 0.08;
 
+      // Expandimos la tolerancia geométrica (aspectRatio de 0.35 a 2.50) para que
+      // no rechace los cuadros si la cámara los distorsiona un poco al inclinar el teléfono.
       if (count >= 4 &&
-          aspectRatio >= 0.55 &&
-          aspectRatio <= 1.45 &&
+          aspectRatio >= 0.35 &&
+          aspectRatio <= 2.50 && 
           fillRatio >= 0.35 &&
-          areaRatio >= 0.00008 &&
-          areaRatio <= 0.025 &&
+          areaRatio >= 0.00004 && 
+          areaRatio <= 0.04 &&
           insideLooseGuide) {
         candidates.add(
           _BlobCandidate(center: center, count: count, fillRatio: fillRatio),
@@ -252,7 +293,8 @@ List<Offset> _matchMarkersToCorners(
       }
     }
 
-    if (bestIndex == -1 || bestDistance > 0.18) {
+    // 🔥 CORRECCIÓN 3: Tolerancia de encuadre ampliada a 0.25
+    if (bestIndex == -1 || bestDistance > 0.25) {
       return const [];
     }
 
@@ -288,18 +330,19 @@ bool _validateRectangle(List<Offset> markers, NormalizedRect guideRect) {
   final leftSlope = (topLeft.dx - bottomLeft.dx).abs();
   final rightSlope = (topRight.dx - bottomRight.dx).abs();
 
-  return widthRatio >= 0.75 &&
-      widthRatio <= 1.25 &&
-      heightRatio >= 0.75 &&
-      heightRatio <= 1.25 &&
-      diagonalRatio >= 0.75 &&
-      diagonalRatio <= 1.25 &&
-      topSlope <= guideRect.height * 0.14 &&
-      bottomSlope <= guideRect.height * 0.14 &&
-      leftSlope <= guideRect.width * 0.14 &&
-      rightSlope <= guideRect.width * 0.14 &&
-      topWidth >= guideRect.width * 0.55 &&
-      leftHeight >= guideRect.height * 0.55;
+  // 🔥 Ligeramente más tolerante a la distorsión del rectángulo
+  return widthRatio >= 0.70 &&
+      widthRatio <= 1.30 &&
+      heightRatio >= 0.70 &&
+      heightRatio <= 1.30 &&
+      diagonalRatio >= 0.70 &&
+      diagonalRatio <= 1.30 &&
+      topSlope <= guideRect.height * 0.20 &&
+      bottomSlope <= guideRect.height * 0.20 &&
+      leftSlope <= guideRect.width * 0.20 &&
+      rightSlope <= guideRect.width * 0.20 &&
+      topWidth >= guideRect.width * 0.40 &&
+      leftHeight >= guideRect.height * 0.40;
 }
 
 class _BlobCandidate {

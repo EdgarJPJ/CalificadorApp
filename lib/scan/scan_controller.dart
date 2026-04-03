@@ -1,18 +1,17 @@
 import 'dart:ui';
-
 import 'package:flutter/foundation.dart';
-
 import 'scan_models.dart';
 
 class ScanController extends ChangeNotifier {
   ScanController({
     NormalizedRect guideRect = const NormalizedRect(
-      left: 0.12,
-      top: 0.16,
-      right: 0.88,
-      bottom: 0.84,
+       left: 0.08, // 🔥 Regresamos a tu ancho original (más angosto)
+      top: 0.22, // 🔥 Mantenemos la nueva altura que quedó perfecta
+      right: 0.92, // 🔥 Regresamos a tu ancho original
+      bottom: 0.78, // 🔥 Mantenemos la nueva altura
     ),
-    Duration stabilityWindow = const Duration(milliseconds: 500),
+    // 🔥 AJUSTE: Bajamos el tiempo de espera a 300ms para que se sienta más rápido
+    Duration stabilityWindow = const Duration(milliseconds: 300),
   }) : _guideRect = guideRect,
        _stabilityWindow = stabilityWindow,
        _state = ScanViewState(
@@ -20,7 +19,7 @@ class ScanController extends ChangeNotifier {
          guideRect: guideRect,
          markers: const [],
          candidates: const [],
-         message: 'No detectado',
+         message: 'Alinea los cuadros negros', // 🔥 Mensaje más amigable
        );
 
   final NormalizedRect _guideRect;
@@ -48,7 +47,7 @@ class ScanController extends ChangeNotifier {
           status: ScanStatus.notDetected,
           candidates: result.candidates,
           markers: result.markers,
-          message: 'No detectado',
+          message: 'Busca los 4 cuadros...',
         ),
       );
       return;
@@ -62,16 +61,17 @@ class ScanController extends ChangeNotifier {
           status: ScanStatus.aligning,
           candidates: result.candidates,
           markers: result.markers,
-          message: 'Alineando',
+          message: 'Acércate o aléjate', // 🔥 Feedback más útil para el usuario
         ),
       );
       return;
     }
 
     final now = DateTime.now();
+    // 🔥 AJUSTE: Aumentamos la tolerancia al temblor de la mano (de 0.025 a 0.045)
     final sameAsPrevious =
         _lastStableMarkers != null &&
-        _averageDistance(_lastStableMarkers!, result.markers) < 0.025;
+        _averageDistance(_lastStableMarkers!, result.markers) < 0.045;
 
     if (!sameAsPrevious) {
       _stableSince = now;
@@ -81,7 +81,7 @@ class ScanController extends ChangeNotifier {
           status: ScanStatus.aligning,
           candidates: result.candidates,
           markers: result.markers,
-          message: 'Alineando',
+          message: 'Mantén quieto...',
         ),
       );
       return;
@@ -94,7 +94,7 @@ class ScanController extends ChangeNotifier {
           status: ScanStatus.ready,
           candidates: result.candidates,
           markers: result.markers,
-          message: 'Listo',
+          message: '¡Listo!',
         ),
       );
       return;
@@ -105,7 +105,7 @@ class ScanController extends ChangeNotifier {
         status: ScanStatus.aligning,
         candidates: result.candidates,
         markers: result.markers,
-        message: 'Alineando',
+        message: 'Mantén quieto...',
       ),
     );
   }
@@ -140,7 +140,7 @@ class ScanController extends ChangeNotifier {
         guideRect: _guideRect,
         markers: const [],
         candidates: const [],
-        message: 'No detectado',
+        message: 'Alinea los cuadros negros',
       ),
     );
   }
