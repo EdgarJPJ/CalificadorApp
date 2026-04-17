@@ -1,32 +1,37 @@
 import 'dart:ui';
+
 import 'package:flutter/foundation.dart';
+
 import 'scan_models.dart';
 
 class ScanController extends ChangeNotifier {
   ScanController({
     NormalizedRect guideRect = const NormalizedRect(
-       left: 0.08, // 🔥 Regresamos a tu ancho original (más angosto)
-      top: 0.22, // 🔥 Mantenemos la nueva altura que quedó perfecta
-      right: 0.92, // 🔥 Regresamos a tu ancho original
-      bottom: 0.78, // 🔥 Mantenemos la nueva altura
+      left: 0.06,
+      top: 0.18,
+      right: 0.94,
+      bottom: 0.84,
     ),
-    // 🔥 AJUSTE: Bajamos el tiempo de espera a 300ms para que se sienta más rápido
-    Duration stabilityWindow = const Duration(milliseconds: 300),
+    Duration stabilityWindow = const Duration(milliseconds: 900),
+    int stableFramesRequired = 3,
   }) : _guideRect = guideRect,
        _stabilityWindow = stabilityWindow,
+       _stableFramesRequired = stableFramesRequired,
        _state = ScanViewState(
          status: ScanStatus.notDetected,
          guideRect: guideRect,
          markers: const [],
          candidates: const [],
-         message: 'Alinea los cuadros negros', // 🔥 Mensaje más amigable
+         message: 'Alinea los 4 marcadores',
        );
 
   final NormalizedRect _guideRect;
   final Duration _stabilityWindow;
+  final int _stableFramesRequired;
   ScanViewState _state;
   DateTime? _stableSince;
   List<Offset>? _lastStableMarkers;
+  int _stableFrameCount = 0;
 
   ScanViewState get state => _state;
 
@@ -40,61 +45,62 @@ class ScanController extends ChangeNotifier {
     }
 
     if (!result.hasExactMarkers) {
-      _stableSince = null;
-      _lastStableMarkers = null;
+      _resetStability();
       _setState(
         _state.copyWith(
           status: ScanStatus.notDetected,
           candidates: result.candidates,
           markers: result.markers,
-          message: 'Busca los 4 cuadros...',
+          message: 'Busca los 4 marcadores...',
         ),
       );
       return;
     }
 
     if (!result.formsRectangle || !result.isInsideGuide) {
-      _stableSince = null;
-      _lastStableMarkers = null;
+      _resetStability();
       _setState(
         _state.copyWith(
           status: ScanStatus.aligning,
           candidates: result.candidates,
           markers: result.markers,
-          message: 'Acércate o aléjate', // 🔥 Feedback más útil para el usuario
+          message: 'Deja espacio alrededor de los marcadores',
         ),
       );
       return;
     }
 
     final now = DateTime.now();
-    // 🔥 AJUSTE: Aumentamos la tolerancia al temblor de la mano (de 0.025 a 0.045)
     final sameAsPrevious =
         _lastStableMarkers != null &&
-        _averageDistance(_lastStableMarkers!, result.markers) < 0.045;
+        _averageDistance(_lastStableMarkers!, result.markers) < 0.025;
 
     if (!sameAsPrevious) {
       _stableSince = now;
       _lastStableMarkers = List<Offset>.from(result.markers);
+      _stableFrameCount = 1;
       _setState(
         _state.copyWith(
           status: ScanStatus.aligning,
           candidates: result.candidates,
           markers: result.markers,
-          message: 'Mantén quieto...',
+          message: 'Manten quieto...',
         ),
       );
       return;
     }
 
+    _stableFrameCount++;
+
     if (_stableSince != null &&
-        now.difference(_stableSince!) >= _stabilityWindow) {
+        now.difference(_stableSince!) >= _stabilityWindow &&
+        _stableFrameCount >= _stableFramesRequired) {
       _setState(
         _state.copyWith(
           status: ScanStatus.ready,
           candidates: result.candidates,
           markers: result.markers,
-          message: '¡Listo!',
+          message: 'Listo!',
         ),
       );
       return;
@@ -105,7 +111,7 @@ class ScanController extends ChangeNotifier {
         status: ScanStatus.aligning,
         candidates: result.candidates,
         markers: result.markers,
-        message: 'Mantén quieto...',
+        message: 'Manten quieto...',
       ),
     );
   }
@@ -126,23 +132,27 @@ class ScanController extends ChangeNotifier {
   }
 
   void markError(String message) {
-    _stableSince = null;
-    _lastStableMarkers = null;
+    _resetStability();
     _setState(_state.copyWith(status: ScanStatus.error, message: message));
   }
 
   void reset() {
-    _stableSince = null;
-    _lastStableMarkers = null;
+    _resetStability();
     _setState(
       ScanViewState(
         status: ScanStatus.notDetected,
         guideRect: _guideRect,
         markers: const [],
         candidates: const [],
-        message: 'Alinea los cuadros negros',
+        message: 'Alinea los 4 marcadores',
       ),
     );
+  }
+
+  void _resetStability() {
+    _stableSince = null;
+    _lastStableMarkers = null;
+    _stableFrameCount = 0;
   }
 
   void _setState(ScanViewState next) {

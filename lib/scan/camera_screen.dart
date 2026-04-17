@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart'; // Para usar compute()
-import 'package:image/image.dart' as img; // Alias para no confundir con widget Image
+import 'package:image/image.dart' as img;
 
 import '../exam_models.dart';
 import '../services/exam_upload_service.dart';
@@ -13,10 +14,17 @@ import 'scan_controller.dart';
 import 'scan_models.dart';
 import 'scan_overlay_painter.dart';
 
+enum ScanUploadMode { uploadKey, gradeExam }
+
 class CameraScreen extends StatefulWidget {
-  const CameraScreen({super.key, required this.materias});
+  const CameraScreen({
+    super.key,
+    required this.materias,
+    required this.mode,
+  });
 
   final List<Materia> materias;
+  final ScanUploadMode mode;
 
   @override
   State<CameraScreen> createState() => _CameraScreenState();
@@ -101,7 +109,7 @@ class _CameraScreenState extends State<CameraScreen>
     } on CameraException catch (error) {
       _scanController.markError(_cameraErrorMessage(error));
     } catch (error) {
-      _scanController.markError('No se pudo inicializar la cámara: $error');
+      _scanController.markError('No se pudo inicializar la camara: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -152,21 +160,20 @@ class _CameraScreenState extends State<CameraScreen>
         await _captureAndUpload();
       }
     } catch (error) {
-      _scanController.markError('Falló la detección: $error');
+      _scanController.markError('Fallo la deteccion: $error');
     } finally {
       _isProcessingFrame = false;
     }
   }
 
-
   String _cameraErrorMessage(CameraException error) {
     switch (error.code) {
       case 'CameraAccessDenied':
-        return 'Permiso de cámara denegado.';
+        return 'Permiso de camara denegado.';
       case 'CameraAccessDeniedWithoutPrompt':
-        return 'Habilita la cámara desde ajustes del sistema.';
+        return 'Habilita la camara desde ajustes del sistema.';
       default:
-        return 'Error de cámara: ${error.description ?? error.code}';
+        return 'Error de camara: ${error.description ?? error.code}';
     }
   }
 
@@ -177,7 +184,7 @@ class _CameraScreenState extends State<CameraScreen>
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('Escanear examen'),
+        title: Text(_screenTitle),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
       ),
@@ -205,7 +212,7 @@ class _CameraScreenState extends State<CameraScreen>
                       _StatusBanner(state: state),
                       const Spacer(),
                       Text(
-                        'Alinea la hoja dentro del marco. La captura será automática.',
+                        'Alinea la hoja completa; la app recortara automaticamente al borde de los marcadores.',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: Colors.white,
@@ -225,6 +232,7 @@ class _CameraScreenState extends State<CameraScreen>
       ),
     );
   }
+
   Future<void> _captureAndUpload() async {
     final controller = _cameraController;
     if (_isCapturing || controller == null) {
@@ -240,10 +248,7 @@ class _CameraScreenState extends State<CameraScreen>
 
       if (!mounted) return;
 
-      // 🔥 Rescatamos las coordenadas de los cuadros verdes detectados
       final currentMarkers = _scanController.state.markers;
-
-      // 🔥 Mandamos a recortar la imagen en segundo plano
       final croppedPath = await compute(_cropImageTask, {
         'path': photo.path,
         'markers': currentMarkers.map((m) => [m.dx, m.dy]).toList(),
@@ -251,27 +256,31 @@ class _CameraScreenState extends State<CameraScreen>
 
       if (!mounted) return;
 
-      // 🔥 Mostramos el diálogo, pero ahora con la imagen YA RECORTADA
       final confirm = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (BuildContext context) {
           return AlertDialog(
-            title: const Text('Vista previa del examen'),
+            title: Text(_previewTitle),
             content: SizedBox(
               width: double.maxFinite,
-              // Le pasamos la ruta de la imagen procesada
               child: Image.file(File(croppedPath), fit: BoxFit.contain),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Reintentar', style: TextStyle(color: Colors.red)),
+                child: const Text(
+                  'Reintentar',
+                  style: TextStyle(color: Colors.red),
+                ),
               ),
               ElevatedButton(
                 onPressed: () => Navigator.of(context).pop(true),
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                child: const Text('Enviar a Calificar', style: TextStyle(color: Colors.white)),
+                child: Text(
+                  _confirmLabel,
+                  style: const TextStyle(color: Colors.white),
+                ),
               ),
             ],
           );
@@ -286,11 +295,7 @@ class _CameraScreenState extends State<CameraScreen>
       }
 
       _scanController.markUploading();
-      // 🔥 Enviamos al servidor únicamente el recorte limpio
-      final results = await ExamUploadService.processExamImage(
-        imagePath: croppedPath, 
-        materias: widget.materias,
-      );
+      final results = await _uploadImage(croppedPath);
 
       if (!mounted) return;
 
@@ -301,58 +306,195 @@ class _CameraScreenState extends State<CameraScreen>
       await _startImageStream();
     }
   }
+
+  String get _screenTitle {
+    return switch (widget.mode) {
+      ScanUploadMode.uploadKey => 'Subir clave maestro',
+      ScanUploadMode.gradeExam => 'Escanear alumno',
+    };
+  }
+
+  String get _previewTitle {
+    return switch (widget.mode) {
+      ScanUploadMode.uploadKey => 'Vista previa de la clave',
+      ScanUploadMode.gradeExam => 'Vista previa del examen',
+    };
+  }
+
+  String get _confirmLabel {
+    return switch (widget.mode) {
+      ScanUploadMode.uploadKey => 'Enviar clave maestro',
+      ScanUploadMode.gradeExam => 'Enviar a calificar',
+    };
+  }
+
+  Future<Map<String, dynamic>> _uploadImage(String croppedPath) {
+    return switch (widget.mode) {
+      ScanUploadMode.uploadKey => ExamUploadService.uploadKey(
+        imagePath: croppedPath,
+        materias: widget.materias,
+      ),
+      ScanUploadMode.gradeExam => ExamUploadService.gradeExam(
+        imagePath: croppedPath,
+      ),
+    };
+  }
 }
 
-// 🔥 FUNCIÓN QUE SE EJECUTA EN SEGUNDO PLANO PARA NO CONGELAR LA APP
 Future<String> _cropImageTask(Map<String, dynamic> params) async {
   final path = params['path'] as String;
-  final markersRaw = params['markers'] as List<List<double>>;
+  final markersRaw = (params['markers'] as List)
+      .map(
+        (entry) =>
+            (entry as List).map((value) => (value as num).toDouble()).toList(),
+      )
+      .toList();
 
   if (markersRaw.length != 4) return path;
 
-  // 1. Leemos la imagen original
   final bytes = File(path).readAsBytesSync();
   final image = img.decodeImage(bytes);
   if (image == null) return path;
 
-  // 2. Calculamos la "caja" (Bounding Box) que encierra los 4 puntos
-  double minX = 1.0, maxX = 0.0, minY = 1.0, maxY = 0.0;
-  for (final m in markersRaw) {
-    if (m[0] < minX) minX = m[0];
-    if (m[0] > maxX) maxX = m[0];
-    if (m[1] < minY) minY = m[1];
-    if (m[1] > maxY) maxY = m[1];
+  double minX = 1.0;
+  double maxX = 0.0;
+  double minY = 1.0;
+  double maxY = 0.0;
+
+  for (final marker in markersRaw) {
+    minX = math.min(minX, marker[0]);
+    maxX = math.max(maxX, marker[0]);
+    minY = math.min(minY, marker[1]);
+    maxY = math.max(maxY, marker[1]);
   }
 
-  // 3. Agregamos un pequeño "colchón" (padding) del 3% para no cortar los bordes negros
-  final padX = 0.01; 
-  final padY = 0.01; 
-  minX = math.max(0.0, minX - padX);
-  maxX = math.min(1.0, maxX + padX);
-  minY = math.max(0.0, minY - padY);
-  maxY = math.min(1.0, maxY + padY);
+  if ((maxX - minX) < 0.20 || (maxY - minY) < 0.20) {
+    return path;
+  }
 
-  // 4. Convertimos a píxeles reales de la foto
-  final cropX = (minX * image.width).toInt();
-  final cropY = (minY * image.height).toInt();
-  final cropW = ((maxX - minX) * image.width).toInt();
-  final cropH = ((maxY - minY) * image.height).toInt();
-
-  // 5. Recortamos
-  final cropped = img.copyCrop(
-    image,
-    x: cropX,
-    y: cropY,
-    width: cropW,
-    height: cropH,
+  var cropRect = _safeExpandedCropRect(
+    minX: minX,
+    maxX: maxX,
+    minY: minY,
+    maxY: maxY,
+    imageWidth: image.width,
+    imageHeight: image.height,
+    paddingX: 0.035,
+    paddingY: 0.035,
   );
 
-  // 6. Guardamos la nueva imagen en una ruta temporal
+  if (!_hasSafeMarkerMargin(cropRect, minX, maxX, minY, maxY)) {
+    cropRect = _safeExpandedCropRect(
+      minX: minX,
+      maxX: maxX,
+      minY: minY,
+      maxY: maxY,
+      imageWidth: image.width,
+      imageHeight: image.height,
+      paddingX: 0.055,
+      paddingY: 0.055,
+    );
+  }
+
+  if (!cropRect.isValid) {
+    return path;
+  }
+
+  final cropped = img.copyCrop(
+    image,
+    x: cropRect.x,
+    y: cropRect.y,
+    width: cropRect.width,
+    height: cropRect.height,
+  );
+
   final newPath = path.replaceAll('.jpg', '_cropped.jpg');
-  File(newPath).writeAsBytesSync(img.encodeJpg(cropped, quality: 85));
+  File(newPath).writeAsBytesSync(img.encodeJpg(cropped, quality: 88));
 
   return newPath;
 }
+
+_CropRect _safeExpandedCropRect({
+  required double minX,
+  required double maxX,
+  required double minY,
+  required double maxY,
+  required int imageWidth,
+  required int imageHeight,
+  required double paddingX,
+  required double paddingY,
+}) {
+  final left = math.max(0.0, minX - paddingX);
+  final right = math.min(1.0, maxX + paddingX);
+  final top = math.max(0.0, minY - paddingY);
+  final bottom = math.min(1.0, maxY + paddingY);
+
+  final x = (left * imageWidth).floor().clamp(0, imageWidth - 1);
+  final y = (top * imageHeight).floor().clamp(0, imageHeight - 1);
+  final rightPx = (right * imageWidth).ceil().clamp(x + 1, imageWidth);
+  final bottomPx = (bottom * imageHeight).ceil().clamp(y + 1, imageHeight);
+
+  return _CropRect(
+    x: x,
+    y: y,
+    width: rightPx - x,
+    height: bottomPx - y,
+    left: left,
+    right: right,
+    top: top,
+    bottom: bottom,
+  );
+}
+
+bool _hasSafeMarkerMargin(
+  _CropRect cropRect,
+  double markerMinX,
+  double markerMaxX,
+  double markerMinY,
+  double markerMaxY,
+) {
+  if (!cropRect.isValid) return false;
+
+  const minMargin = 0.02;
+  final cropWidth = cropRect.right - cropRect.left;
+  final cropHeight = cropRect.bottom - cropRect.top;
+  if (cropWidth <= 0 || cropHeight <= 0) return false;
+
+  final leftMargin = (markerMinX - cropRect.left) / cropWidth;
+  final rightMargin = (cropRect.right - markerMaxX) / cropWidth;
+  final topMargin = (markerMinY - cropRect.top) / cropHeight;
+  final bottomMargin = (cropRect.bottom - markerMaxY) / cropHeight;
+
+  return leftMargin >= minMargin &&
+      rightMargin >= minMargin &&
+      topMargin >= minMargin &&
+      bottomMargin >= minMargin;
+}
+
+class _CropRect {
+  const _CropRect({
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+    required this.left,
+    required this.right,
+    required this.top,
+    required this.bottom,
+  });
+
+  final int x;
+  final int y;
+  final int width;
+  final int height;
+  final double left;
+  final double right;
+  final double top;
+  final double bottom;
+
+  bool get isValid => width > 10 && height > 10 && right > left && bottom > top;
+}
+
 class _StatusBanner extends StatelessWidget {
   const _StatusBanner({required this.state});
 

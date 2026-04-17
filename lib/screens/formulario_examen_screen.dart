@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../exam_models.dart';
-import '../widgets/tarjeta_materia.dart';
-import '../widgets/botones_accion.dart';
-import '../utils/dialogos_examen.dart';
 import '../scan/camera_screen.dart';
+import '../utils/dialogos_examen.dart';
+import '../widgets/botones_accion.dart';
+import '../widgets/tarjeta_materia.dart';
 import 'pdf_preview_screen.dart';
 
 class FormularioExamenScreen extends StatefulWidget {
@@ -16,23 +16,25 @@ class FormularioExamenScreen extends StatefulWidget {
 
 class _FormularioExamenScreenState extends State<FormularioExamenScreen> {
   final TextEditingController _alumnosController = TextEditingController();
+  bool _claveMaestroCargada = false;
 
   List<Materia> materias = [
-    Materia(nombre: "Lenguajes", numeroPreguntas: 20),
-    Materia(nombre: "Saberes y Pensamiento Científico", numeroPreguntas: 30),
-    Materia(nombre: "Ética Naturaleza y Sociedades", numeroPreguntas: 15),
-    Materia(nombre: "De lo Humano y lo Comunitario", numeroPreguntas: 25),
+    Materia(nombre: 'Lenguajes', numeroPreguntas: 20),
+    Materia(nombre: 'Saberes y Pensamiento Cientifico', numeroPreguntas: 30),
+    Materia(nombre: 'Etica Naturaleza y Sociedades', numeroPreguntas: 15),
+    Materia(nombre: 'De lo Humano y lo Comunitario', numeroPreguntas: 25),
   ];
 
   void _agregarMateria() {
     setState(() {
-      materias.add(Materia(nombre: "Nueva Materia", numeroPreguntas: 10));
+      materias.add(Materia(nombre: 'Nueva Materia', numeroPreguntas: 10));
     });
   }
 
   void _eliminarMateria(int index) {
     setState(() {
       materias.removeAt(index);
+      _claveMaestroCargada = false;
     });
   }
 
@@ -49,19 +51,47 @@ class _FormularioExamenScreenState extends State<FormularioExamenScreen> {
     );
   }
 
-  Future<void> _escanearExamen() async {
-    final resultados = await Navigator.push<Map<String, dynamic>>(
-      context,
-      MaterialPageRoute(builder: (_) => CameraScreen(materias: materias)),
-    );
+  Future<void> _subirClaveMaestro() async {
+    final resultados = await _abrirCamara(ScanUploadMode.uploadKey);
+
+    if (!mounted || resultados == null) return;
+
+    setState(() {
+      _claveMaestroCargada = true;
+    });
+    DialogosExamen.mostrarClaveCargada(context, resultados);
+  }
+
+  Future<void> _escanearAlumno() async {
+    if (!_claveMaestroCargada) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Primero sube la clave del maestro.'),
+        ),
+      );
+      return;
+    }
+
+    final resultados = await _abrirCamara(ScanUploadMode.gradeExam);
 
     if (!mounted || resultados == null) return;
 
     try {
-      DialogosExamen.mostrarResultados(context, materias, resultados);
+      DialogosExamen.mostrarCalificacion(context, resultados);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
     }
+  }
+
+  Future<Map<String, dynamic>?> _abrirCamara(ScanUploadMode mode) {
+    return Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CameraScreen(materias: materias, mode: mode),
+      ),
+    );
   }
 
   @override
@@ -86,17 +116,17 @@ class _FormularioExamenScreenState extends State<FormularioExamenScreen> {
               controller: _alumnosController,
               decoration: const InputDecoration(
                 labelText: 'Lista de Alumnos (Separados por coma)',
-                hintText: 'Ej. Juan Pérez, Ana Gómez, Luis Díaz...',
+                hintText: 'Ej. Juan Perez, Ana Gomez, Luis Diaz...',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.people),
               ),
               maxLines: 2,
             ),
             const SizedBox(height: 15),
+            _EstadoClaveBanner(claveMaestroCargada: _claveMaestroCargada),
+            const SizedBox(height: 10),
             const Divider(),
             const SizedBox(height: 10),
-            
-            // 🔥 LISTA DE MATERIAS DELEGADA AL WIDGET TarjetaMateria
             Expanded(
               child: ListView.builder(
                 itemCount: materias.length,
@@ -104,19 +134,28 @@ class _FormularioExamenScreenState extends State<FormularioExamenScreen> {
                   return TarjetaMateria(
                     materia: materias[index],
                     onEliminar: () => _eliminarMateria(index),
-                    // Nota: Asumo que `normalizarNombreMateria` es una función global que tienes
-                    onNombreChanged: (value) => materias[index].nombre = normalizarNombreMateria(value),
-                    onPreguntasChanged: (value) => materias[index].numeroPreguntas = int.tryParse(value) ?? 10,
+                    onNombreChanged: (value) {
+                      materias[index].nombre = normalizarNombreMateria(value);
+                      if (_claveMaestroCargada) {
+                        setState(() {
+                          _claveMaestroCargada = false;
+                        });
+                      }
+                    },
+                    onPreguntasChanged: (value) {
+                      materias[index].numeroPreguntas =
+                          int.tryParse(value) ?? 10;
+                    },
                   );
                 },
               ),
             ),
-            
-            // 🔥 BOTONES DELEGADOS AL WIDGET BotonesAccion
             BotonesAccion(
               onGenerarAlumnos: () => _generarPDF(false),
               onGenerarMaestro: () => _generarPDF(true),
-              onEscanear: _escanearExamen,
+              onSubirClave: _subirClaveMaestro,
+              onEscanearAlumno: _escanearAlumno,
+              claveMaestroCargada: _claveMaestroCargada,
             ),
           ],
         ),
@@ -125,6 +164,43 @@ class _FormularioExamenScreenState extends State<FormularioExamenScreen> {
         onPressed: _agregarMateria,
         tooltip: 'Agregar Materia',
         child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+
+class _EstadoClaveBanner extends StatelessWidget {
+  const _EstadoClaveBanner({required this.claveMaestroCargada});
+
+  final bool claveMaestroCargada;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = claveMaestroCargada ? Colors.green : Colors.orange;
+    final icon = claveMaestroCargada ? Icons.check_circle : Icons.info_outline;
+    final text = claveMaestroCargada
+        ? 'Clave del maestro cargada en el backend.'
+        : 'Sube la clave del maestro antes de escanear alumnos.';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(color: color, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ),
     );
   }

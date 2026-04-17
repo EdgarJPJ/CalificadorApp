@@ -3,13 +3,17 @@ import 'package:flutter/material.dart';
 class BotonesAccion extends StatelessWidget {
   final VoidCallback onGenerarAlumnos;
   final VoidCallback onGenerarMaestro;
-  final VoidCallback onEscanear;
+  final VoidCallback onSubirClave;
+  final VoidCallback onEscanearAlumno;
+  final bool claveMaestroCargada;
 
   const BotonesAccion({
     super.key,
     required this.onGenerarAlumnos,
     required this.onGenerarMaestro,
-    required this.onEscanear,
+    required this.onSubirClave,
+    required this.onEscanearAlumno,
+    required this.claveMaestroCargada,
   });
 
   @override
@@ -22,7 +26,10 @@ class BotonesAccion extends StatelessWidget {
               child: ElevatedButton.icon(
                 onPressed: onGenerarAlumnos,
                 icon: const Icon(Icons.person),
-                label: const Text("Generar Alumnos", style: TextStyle(fontSize: 13)),
+                label: const Text(
+                  'Generar Alumnos',
+                  style: TextStyle(fontSize: 13),
+                ),
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   backgroundColor: Colors.green,
@@ -35,7 +42,10 @@ class BotonesAccion extends StatelessWidget {
               child: ElevatedButton.icon(
                 onPressed: onGenerarMaestro,
                 icon: const Icon(Icons.school),
-                label: const Text("Clave Maestro", style: TextStyle(fontSize: 13)),
+                label: const Text(
+                  'Clave Maestro',
+                  style: TextStyle(fontSize: 13),
+                ),
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   backgroundColor: Colors.deepPurple,
@@ -46,18 +56,42 @@ class BotonesAccion extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: onEscanear,
-            icon: const Icon(Icons.camera_alt, size: 28),
-            label: const Text("ESCANEAR Y CALIFICAR", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 15),
-              backgroundColor: Colors.blueAccent,
-              foregroundColor: Colors.white,
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: onSubirClave,
+                icon: const Icon(Icons.upload_file),
+                label: const Text(
+                  'SUBIR CLAVE',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                ),
+              ),
             ),
-          ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: onEscanearAlumno,
+                icon: Icon(
+                  claveMaestroCargada ? Icons.camera_alt : Icons.lock_outline,
+                ),
+                label: const Text(
+                  'ESCANEAR ALUMNO',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  backgroundColor: Colors.blueAccent,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );

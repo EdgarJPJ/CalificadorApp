@@ -9,10 +9,10 @@ import 'scan_models.dart';
 class MarkerDetector {
   const MarkerDetector({
     this.guideRect = const NormalizedRect(
-      left: 0.08, // 🔥 Regresamos a tu ancho original (más angosto)
-      top: 0.22, // 🔥 Mantenemos la nueva altura que quedó perfecta
-      right: 0.92, // 🔥 Regresamos a tu ancho original
-      bottom: 0.78, // 🔥 Mantenemos la nueva altura
+      left: 0.06,
+      top: 0.18,
+      right: 0.94,
+      bottom: 0.84,
     ),
   });
 
@@ -80,18 +80,14 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
     bottom: (payload['guideBottom']! as num).toDouble(),
   );
 
-  // 🔥 MAGIA AQUÍ: Detectar si el sensor de la cámara está "acostado" (Landscape)
-  // mientras el teléfono está "de pie" (Portrait).
   final isRotated = width > height;
 
-  // Convertimos el marco guía de la pantalla a las coordenadas reales del sensor
   double sGuideLeft = guideRect.left;
   double sGuideRight = guideRect.right;
   double sGuideTop = guideRect.top;
   double sGuideBottom = guideRect.bottom;
 
   if (isRotated) {
-    // Rotación de 90 grados en dirección a las manecillas del reloj (Estándar en Android)
     sGuideLeft = guideRect.top;
     sGuideRight = guideRect.bottom;
     sGuideTop = 1.0 - guideRect.right;
@@ -104,7 +100,7 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
   final reducedHeight = math.max(1, height ~/ sampleStep);
 
   final luminance = List<int>.filled(reducedWidth * reducedHeight, 0);
-  
+
   final minGuideX = (sGuideLeft * reducedWidth).toInt();
   final maxGuideX = (sGuideRight * reducedWidth).toInt();
   final minGuideY = (sGuideTop * reducedHeight).toInt();
@@ -120,8 +116,7 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
       final value = bytes[(sourceY * bytesPerRow) + sourceX];
       final index = (y * reducedWidth) + x;
       luminance[index] = value;
-      
-      // Calculamos la luz solo dentro del marco para ignorar la mesa oscura
+
       if (x >= minGuideX && x <= maxGuideX && y >= minGuideY && y <= maxGuideY) {
         sum += value;
         sampleCount++;
@@ -131,7 +126,7 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
 
   final mean = sampleCount > 0 ? sum / sampleCount : 128.0;
   final threshold = math.min(150.0, mean * 0.75).round();
-  
+
   final visited = Uint8List(reducedWidth * reducedHeight);
   final candidates = <_BlobCandidate>[];
   final queueX = List<int>.filled(reducedWidth * reducedHeight, 0);
@@ -172,7 +167,10 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
         maxY = math.max(maxY, currentY);
 
         for (final delta in const <List<int>>[
-          [-1, 0], [1, 0], [0, -1], [0, 1],
+          [-1, 0],
+          [1, 0],
+          [0, -1],
+          [0, 1],
         ]) {
           final nextX = currentX + delta[0];
           final nextY = currentY + delta[1];
@@ -201,14 +199,13 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
       final boxArea = boxWidth * boxHeight;
       final fillRatio = count / boxArea;
       final areaRatio = boxArea / (reducedWidth * reducedHeight);
-      
+
       double normX = (sumX / count + 0.5) / reducedWidth;
       double normY = (sumY / count + 0.5) / reducedHeight;
 
-      // 🔥 AQUÍ DEVOLVEMOS LAS COORDENADAS A LA NORMALIDAD (PORTRAIT)
       double finalX = normX;
       double finalY = normY;
-      
+
       if (isRotated) {
         finalX = 1.0 - normY;
         finalY = normX;
@@ -222,13 +219,11 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
           center.dy >= guideRect.top - 0.08 &&
           center.dy <= guideRect.bottom + 0.08;
 
-      // Expandimos la tolerancia geométrica (aspectRatio de 0.35 a 2.50) para que
-      // no rechace los cuadros si la cámara los distorsiona un poco al inclinar el teléfono.
       if (count >= 4 &&
           aspectRatio >= 0.35 &&
-          aspectRatio <= 2.50 && 
+          aspectRatio <= 2.50 &&
           fillRatio >= 0.35 &&
-          areaRatio >= 0.00004 && 
+          areaRatio >= 0.00004 &&
           areaRatio <= 0.04 &&
           insideLooseGuide) {
         candidates.add(
@@ -245,7 +240,8 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
       .toList(growable: false);
   final markers = _matchMarkersToCorners(candidatePoints, guideRect);
   final hasExactMarkers = markers.length == 4;
-  final isInsideGuide = hasExactMarkers && markers.every(guideRect.contains);
+  final isInsideGuide =
+      hasExactMarkers && markers.every((point) => _isInsideGuideMargin(point, guideRect));
   final formsRectangle =
       hasExactMarkers && _validateRectangle(markers, guideRect);
 
@@ -260,6 +256,14 @@ Map<String, Object?> _detectMarkersInIsolate(Map<String, Object?> payload) {
     'formsRectangle': formsRectangle,
     'isInsideGuide': isInsideGuide,
   };
+}
+
+bool _isInsideGuideMargin(Offset point, NormalizedRect guideRect) {
+  const margin = 0.025;
+  return point.dx >= guideRect.left + margin &&
+      point.dx <= guideRect.right - margin &&
+      point.dy >= guideRect.top + margin &&
+      point.dy <= guideRect.bottom - margin;
 }
 
 List<Offset> _matchMarkersToCorners(
@@ -293,7 +297,6 @@ List<Offset> _matchMarkersToCorners(
       }
     }
 
-    // 🔥 CORRECCIÓN 3: Tolerancia de encuadre ampliada a 0.25
     if (bestIndex == -1 || bestDistance > 0.25) {
       return const [];
     }
@@ -330,7 +333,6 @@ bool _validateRectangle(List<Offset> markers, NormalizedRect guideRect) {
   final leftSlope = (topLeft.dx - bottomLeft.dx).abs();
   final rightSlope = (topRight.dx - bottomRight.dx).abs();
 
-  // 🔥 Ligeramente más tolerante a la distorsión del rectángulo
   return widthRatio >= 0.70 &&
       widthRatio <= 1.30 &&
       heightRatio >= 0.70 &&
